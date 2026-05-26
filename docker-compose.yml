@@ -1,0 +1,58 @@
+
+services:
+
+  # 1. BROKER MQTT 
+  broker-mqtt:
+    image: eclipse-mosquitto:alpine
+    container_name: broker-mqtt
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./infra/mosquitto/config/mosquitto.conf:/infra/mosquitto/config/mosquitto.conf
+      - ./infra/mosquitto/data:/infra/mosquitto/data
+      - ./infra/mosquitto/log:/infra/mosquitto/log
+    restart: always
+
+  # 2. BANCO DE DADOS TIMESCALEDB
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    container_name: teg_timescaledb
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=senha # Mude isso depois
+      - POSTGRES_DB=teg_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb-storage:/var/lib/postgresql/data
+    restart: always
+
+  # 3. AGENTE DE INGESTÃO (MQTT -> DB)
+  telegraf:
+    image: telegraf:latest
+    container_name: teg_telegraf
+    depends_on:
+      - broker-mqtt
+      - timescaledb
+    volumes:
+      - ./infra/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    restart: always
+
+  # 4. DASHBOARD DE OBSERVABILIDADE
+  grafana:
+    image: grafana/grafana:latest
+    container_name: teg_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin # Senha do Grafana
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    depends_on:
+      - timescaledb
+    restart: always
+
+volumes:
+  grafana-storage: {}
+  timescaledb-storage: {}
