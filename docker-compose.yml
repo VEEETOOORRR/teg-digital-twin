@@ -17,17 +17,17 @@ services:
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
     healthcheck:
-      test: ["CMD-SHELL", "timeout 5s mosquitto_sub -t '$$SYS/#' -c 1 -i healthcheck || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 1883 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
       start_period: 5s
     networks:
       - teg_network
 
   simulator:
     build:
-      context: ./simulator
+      context: ./embed_simulator
       dockerfile: Dockerfile
     container_name: teg_simulator
     restart: unless-stopped
@@ -59,9 +59,9 @@ services:
       - influxdb_data:/var/lib/influxdb2
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8086/ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      interval: 5s
+      timeout: 3s
+      retries: 5
       start_period: 10s
     networks:
       - teg_network
@@ -82,7 +82,7 @@ services:
 
   processing:
     build:
-      context: ./processing
+      context: ./ansys_processing
       dockerfile: Dockerfile
     container_name: teg_processing
     restart: unless-stopped
@@ -109,6 +109,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: grafanapassword
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       influxdb:
         condition: service_healthy
