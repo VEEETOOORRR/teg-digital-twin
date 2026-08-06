@@ -1,58 +1,122 @@
+name: gemeo-digital-teg
+
+networks:
+  teg_network:
+    driver: bridge
 
 services:
-
-  # 1. BROKER MQTT 
-  broker-mqtt:
-    image: eclipse-mosquitto:alpine
-    container_name: broker-mqtt
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: teg_mosquitto
+    restart: unless-stopped
     ports:
       - "1883:1883"
       - "9001:9001"
     volumes:
-      - ./infra/mosquitto/config/mosquitto.conf:/infra/mosquitto/config/mosquitto.conf
-      - ./infra/mosquitto/data:/infra/mosquitto/data
-      - ./infra/mosquitto/log:/infra/mosquitto/log
-    restart: always
+      - ./infra/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5s mosquitto_sub -t '$$SYS/#' -c 1 -i healthcheck || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - teg_network
 
-  # 2. BANCO DE DADOS TIMESCALEDB
-  timescaledb:
-    image: timescale/timescaledb:latest-pg14
-    container_name: teg_timescaledb
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=senha # Mude isso depois
-      - POSTGRES_DB=teg_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - timescaledb-storage:/var/lib/postgresql/data
-    restart: always
-
-  # 3. AGENTE DE INGESTÃO (MQTT -> DB)
-  telegraf:
-    image: telegraf:latest
-    container_name: teg_telegraf
+  simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+    container_name: teg_simulator
+    restart: unless-stopped
     depends_on:
-      - broker-mqtt
-      - timescaledb
+      mosquitto:
+        condition: service_healthy
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+      MQTT_TOPIC: teg/bancada/telemetria
+      PUBLISH_INTERVAL: 1.0
+    networks:
+      - teg_network
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: teg_influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: adminpassword123
+      DOCKER_INFLUXDB_INIT_ORG: teg_org
+      DOCKER_INFLUXDB_INIT_BUCKET: teg_telemetry
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: my-super-secret-admin-token
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - teg_network
+
+  telegraf:
+    image: telegraf:1.28
+    container_name: teg_telegraf
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
     volumes:
       - ./infra/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
-    restart: always
+    networks:
+      - teg_network
 
-  # 4. DASHBOARD DE OBSERVABILIDADE
+  processing:
+    build:
+      context: ./processing
+      dockerfile: Dockerfile
+    container_name: teg_processing
+    restart: unless-stopped
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    environment:
+      INFLUX_URL: http://influxdb:8086
+      INFLUX_TOKEN: my-super-secret-admin-token
+      INFLUX_ORG: teg_org
+      INFLUX_BUCKET_RAW: teg_telemetry
+      INFLUX_BUCKET_ANALYTICS: teg_telemetry
+    networks:
+      - teg_network
+
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:10.1.0
     container_name: teg_grafana
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin # Senha do Grafana
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: grafanapassword
     volumes:
-      - grafana-storage:/var/lib/grafana
+      - grafana_data:/var/lib/grafana
     depends_on:
-      - timescaledb
-    restart: always
+      influxdb:
+        condition: service_healthy
+    networks:
+      - teg_network
 
 volumes:
-  grafana-storage: {}
-  timescaledb-storage: {}
+  mosquitto_data:
+  mosquitto_log:
+  influxdb_data:
+  grafana_data:

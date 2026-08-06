@@ -1,0 +1,12 @@
+{
+  "lut_data": [
+    {"delta_t": 10.0, "v_oc_ideal": 0.85, "p_max_ideal": 120.0, "r_int_nominal": 1.50},
+    {"delta_t": 20.0, "v_oc_ideal": 1.70, "p_max_ideal": 480.0, "r_int_nominal": 1.52},
+    {"delta_t": 30.0, "v_oc_ideal": 2.55, "p_max_ideal": 1080.0, "r_int_nominal": 1.55},
+    {"delta_t": 40.0, "v_oc_ideal": 3.40, "p_max_ideal": 1920.0, "r_int_nominal": 1.58},
+    {"delta_t": 50.0, "v_oc_ideal": 4.25, "p_max_ideal": 3000.0, "r_int_nominal": 1.62},
+    {"delta_t": 60.0, "v_oc_ideal": 5.10, "p_max_ideal": 4320.0, "r_int_nominal": 1.66},
+    {"delta_t": 70.0, "v_oc_ideal": 5.95, "p_max_ideal": 5880.0, "r_int_nominal": 1.71},
+    {"delta_t": 80.0, "v_oc_ideal": 6.80, "p_max_ideal": 7680.0, "r_int_nominal": 1.76}
+  ]
+}
