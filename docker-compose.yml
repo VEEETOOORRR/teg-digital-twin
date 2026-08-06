@@ -4,44 +4,42 @@ networks:
   teg_network:
     driver: bridge
 
+volumes:
+  influxdb_data:
+  grafana_data:
+
 services:
+  # ============================================================================
+  # 1. BROKER MQTT & SIMULADOR EMBARCADO (ESP32)
+  # ============================================================================
   mosquitto:
-    image: eclipse-mosquitto:2.0
-    container_name: teg_mosquitto
-    restart: unless-stopped
+    image: eclipse-mosquitto:latest
+    container_name: mosquitto
+    restart: always
     ports:
       - "1883:1883"
-      - "9001:9001"
     volumes:
-      - ./infra/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - mosquitto_data:/mosquitto/data
-      - mosquitto_log:/mosquitto/log
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 1883 || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 5s
+      - ./mosquitto/config/mosquitto.conf:/infra/mosquitto/config/mosquitto.conf
     networks:
       - teg_network
 
-  simulator:
-    build:
-      context: ./embed_simulator
-      dockerfile: Dockerfile
-    container_name: teg_simulator
-    restart: unless-stopped
-    depends_on:
-      mosquitto:
-        condition: service_healthy
+  esp32_simulator:
+    build: ./embed_simulator
+    container_name: esp32_simulator
+    restart: always
     environment:
-      MQTT_BROKER: mosquitto
-      MQTT_PORT: 1883
-      MQTT_TOPIC: teg/bancada/telemetria
-      PUBLISH_INTERVAL: 1.0
+      - MQTT_BROKER=mosquitto
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=teg/bancada/telemetria
+      - PUBLISH_INTERVAL=1.0
+    depends_on:
+      - mosquitto
     networks:
       - teg_network
 
+  # ============================================================================
+  # 2. BANCO DE DADOS TEMPO-REAL & COLETOR TELEGRAF
+  # ============================================================================
   influxdb:
     image: influxdb:2.7
     container_name: teg_influxdb
@@ -57,12 +55,6 @@ services:
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: my-super-secret-admin-token
     volumes:
       - influxdb_data:/var/lib/influxdb2
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8086/ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
     networks:
       - teg_network
 
@@ -71,33 +63,59 @@ services:
     container_name: teg_telegraf
     restart: unless-stopped
     depends_on:
-      mosquitto:
-        condition: service_healthy
-      influxdb:
-        condition: service_healthy
+      - influxdb
+      - mosquitto
     volumes:
       - ./infra/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
     networks:
       - teg_network
 
-  processing:
+  # ============================================================================
+  # 3. GÊMEO DIGITAL (ANSYS) & MODELO DE INFERÊNCIA (PYTORCH)
+  # ============================================================================
+  ansys_simulator:
     build:
-      context: ./ansys_processing
+      context: ./ansys_simulator
       dockerfile: Dockerfile
-    container_name: teg_processing
+    container_name: teg_ansys_simulator
     restart: unless-stopped
     depends_on:
-      influxdb:
-        condition: service_healthy
+      - influxdb
+      - telegraf
     environment:
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: my-super-secret-admin-token
       INFLUX_ORG: teg_org
       INFLUX_BUCKET_RAW: teg_telemetry
       INFLUX_BUCKET_ANALYTICS: teg_telemetry
+      INFLUX_MEASUREMENT: esp32_telemetry
+      LUT_FILEPATH: /app/models/ansys_lut.json
+    volumes:
+      - ./ansys_simulator/models:/app/models
     networks:
       - teg_network
 
+  ml_inference:
+    build:
+      context: ./ml_inference
+      dockerfile: Dockerfile
+    container_name: teg_ml_inference
+    restart: unless-stopped
+    depends_on:
+      - influxdb
+    environment:
+      INFLUX_URL: http://influxdb:8086
+      INFLUX_TOKEN: my-super-secret-admin-token
+      INFLUX_ORG: teg_org
+      INFLUX_BUCKET: teg_telemetry
+    volumes:
+      - ./ml_inference/models:/app/models
+    networks:
+      - teg_network
+
+  # ============================================================================
+  # 4. DASHBOARDS E VISUALIZAÇÃO
+  # ============================================================================
   grafana:
     image: grafana/grafana:10.1.0
     container_name: teg_grafana
@@ -109,16 +127,5 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: grafanapassword
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    depends_on:
-      influxdb:
-        condition: service_healthy
     networks:
       - teg_network
-
-volumes:
-  mosquitto_data:
-  mosquitto_log:
-  influxdb_data:
-  grafana_data:

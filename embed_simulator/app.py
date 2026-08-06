@@ -5,61 +5,64 @@ import math
 import random
 import logging
 import paho.mqtt.client as mqtt
+from ekf import *
 
 # Configuração de Logs
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Variáveis do Broker MQTT via Ambiente
+# Configurações do Broker MQTT via variáveis de ambiente
 MQTT_BROKER = os.getenv("MQTT_BROKER", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_TOPIC = os.getenv("MQTT_TOPIC", "teg/bancada/telemetria")
 PUBLISH_INTERVAL = float(os.getenv("PUBLISH_INTERVAL", 1.0))
 
-def generate_synthetic_teg_data(step):
+def generate_physical_data(step, ekf_filter):
     """
-    Gera dados sintéticos simulando um ciclo térmico no TEG.
-    A temperatura do lado quente flutua senoidalmente entre 45°C e 95°C.
+    Simula os sensores físicos ruidosos da bancada e aplica o EKF
+    para estimar a resistência interna em tempo real.
     """
-    # 1. Simulação Térmica
-    t_frio = 25.0 + random.uniform(-0.2, 0.2) # Temperatura ambiente levemente ruidosa
-    # Flutuação senoidal suave de temperatura
-    t_quente = 70.0 + 25.0 * math.sin(step * 0.05) + random.uniform(-0.3, 0.3)
-    
+    # 1. Leitura bruta/ruidosa das temperaturas
+    t_frio = 25.0 + random.uniform(-0.3, 0.3)
+    t_quente = 70.0 + 25.0 * math.sin(step * 0.05) + random.uniform(-0.5, 0.5)
     delta_t = max(0.1, t_quente - t_frio)
 
-    # 2. Resposta Elétrica Sintética Baseada na Física do TEG
-    # Coeficiente Seebeck aproximado do módulo: ~0.085 V/K
+    # Parametrização física base do TEG
     seebeck_alpha = 0.085
-    r_interna = 1.6 # Ohms
-    r_carga = 2.0   # Carga resistiva conectada em Ohms
+    r_interna_real = 1.6  # Resistência nominal
+    r_carga = 2.0
 
-    v_oc = seebeck_alpha * delta_t # Tensão em circuito aberto
-    i_amp = v_oc / (r_interna + r_carga) # Corrente de circuito
-    v_medida = i_amp * r_carga # Tensão sobre a carga
+    # Injeção de Anomalia Física (a cada 200 passos simula degradação por trinca/solda)
+    if (step % 200) > 180:
+        r_interna_real = 3.2  # Dobra a resistência interna real devido à degradação
 
-    # Adicionar ruído de medição dos sensores (ADC / MAX6675 / INA219)
+    v_oc = seebeck_alpha * delta_t
+    i_amp = v_oc / (r_interna_real + r_carga)
+    v_medida = i_amp * r_carga
+
+    # Adiciona ruído de medição aos sensores (ADC / MAX6675 / INA219)
     v_medida_ruido = max(0.0, v_medida + random.uniform(-0.02, 0.02))
     i_mA_ruido = max(0.0, (i_amp * 1000.0) + random.uniform(-2.0, 2.0))
-    p_mW_ruido = v_medida_ruido * i_mA_ruido
+    p_mW = v_medida_ruido * i_mA_ruido
 
-    # Opcional: Injetar uma anomalia esporádica para testar os alertas do Gêmeo Digital
-    # A cada 200 passos, simula uma degradação temporária na pasta térmica ou trinca
-    if (step % 200) > 180:
-        v_medida_ruido *= 0.75 # Queda de tensão por alta resistência interna
-        p_mW_ruido = v_medida_ruido * i_mA_ruido
+    # 2. Processamento EKF em tempo real
+    r_interna_estimada = ekf_filter.update(t_quente, t_frio, i_mA_ruido, v_medida_ruido)
 
-    payload = {
-        "device_id": "ESP32_SIMULADO",
+    # 3. Payload contendo os dados físicos + estado estimado pelo EKF
+    return {
+        "device_id": "ESP32_BANCADA",
         "t_quente": round(t_quente, 2),
         "t_frio": round(t_frio, 2),
         "tensao_V": round(v_medida_ruido, 3),
         "corrente_mA": round(i_mA_ruido, 2),
-        "potencia_mW": round(p_mW_ruido, 2)
+        "potencia_mW": round(p_mW, 2),
+        "r_interna_ekf": round(r_interna_estimada, 3)  # <-- Estado Oculto Estimado pelo EKF!
     }
 
-    return payload
 
 def main():
+    # Instancia o filtro EKF fora do loop para manter o estado persistente
+    ekf = TEGExtendedKalmanFilter(seebeck_alpha=0.085, r_init=1.6)
+
     client = mqtt.Client(client_id="TEG_Hardware_Simulator")
 
     connected = False
@@ -78,7 +81,7 @@ def main():
 
     try:
         while True:
-            telemetry = generate_synthetic_teg_data(step)
+            telemetry = generate_physical_data(step, ekf)
             json_payload = json.dumps(telemetry)
             
             client.publish(MQTT_TOPIC, json_payload)
@@ -91,6 +94,7 @@ def main():
     finally:
         client.loop_stop()
         client.disconnect()
+
 
 if __name__ == "__main__":
     main()

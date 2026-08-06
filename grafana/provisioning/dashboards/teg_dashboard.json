@@ -14,16 +14,16 @@
   "graphTooltip": 1,
   "id": null,
   "title": "Gêmeo Digital TEG - Sistema Completo",
-  "tags": ["TEG", "ESP32", "Digital Twin"],
+  "tags": ["TEG", "ESP32", "Digital Twin", "EKF", "PyTorch"],
   "timezone": "browser",
   "schemaVersion": 38,
-  "version": 4,
+  "version": 5,
   "panels": [
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "id": 10,
-      "title": "📡 Telemetria de Campo (Dados Brutos ESP32 / Simulador)",
+      "title": "📡 Telemetria em Tempo Real (Bancada ESP32 + Filtro de Kalman EKF)",
       "type": "row"
     },
     {
@@ -36,32 +36,33 @@
         "defaults": {
           "unit": "celsius",
           "color": { "mode": "palette-classic" },
-          "custom": { "drawStyle": "line", "fillOpacity": 10 }
+          "custom": { "drawStyle": "line", "fillOpacity": 15, "lineWidth": 2 }
         }
       },
       "targets": [
         {
           "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
-          "query": "from(bucket: \"teg_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\")\n  |> filter(fn: (r) => r[\"_field\"] == \"t_quente\" or r[\"_field\"] == \"t_frio\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
+          "query": "from(bucket: \"teg_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"esp32_telemetry\")\n  |> filter(fn: (r) => r[\"_field\"] == \"t_quente\" or r[\"_field\"] == \"t_frio\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
         }
       ]
     },
     {
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
       "id": 12,
-      "title": "Potência Gerada no Dispositivo (mW)",
+      "title": "Potência Elétrica (Real vs Teórica ANSYS)",
       "type": "timeseries",
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
       "fieldConfig": {
         "defaults": {
           "unit": "mW",
-          "color": { "fixedColor": "green", "mode": "fixed" }
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }
         }
       },
       "targets": [
         {
           "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
-          "query": "from(bucket: \"teg_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"mqtt_consumer\")\n  |> filter(fn: (r) => r[\"_field\"] == \"potencia_mW\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
+          "query": "from(bucket: \"teg_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => (r[\"_measurement\"] == \"esp32_telemetry\" and r[\"_field\"] == \"potencia_mW\") or (r[\"_measurement\"] == \"teg_analytics\" and r[\"_field\"] == \"p_ideal_mW\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
         }
       ]
     },
@@ -69,13 +70,13 @@
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
       "id": 20,
-      "title": "🤖 Inteligência & Gêmeo Digital (Processamento Analytics)",
+      "title": "🧠 Inteligência & Gêmeo Digital (ANSYS + ML PyTorch)",
       "type": "row"
     },
     {
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 10 },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 10 },
       "id": 21,
-      "title": "Eficiência Relativa (Real vs ANSYS)",
+      "title": "Eficiência Relativa (Gêmeo Digital vs Modelo ANSYS)",
       "type": "gauge",
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
       "fieldConfig": {
@@ -101,48 +102,107 @@
       ]
     },
     {
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 10 },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 10 },
       "id": 22,
-      "title": "Saúde do Módulo (Status)",
+      "title": "Saúde Operacional da Bancada TEG",
       "type": "stat",
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.15 },
+              { "color": "red", "value": 0.35 }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "range",
+              "options": {
+                "from": 0,
+                "to": 0.149,
+                "result": { "text": "SAUDÁVEL", "color": "green" }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 0.15,
+                "to": 0.349,
+                "result": { "text": "ALERTA", "color": "yellow" }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 0.35,
+                "to": 1.0,
+                "result": { "text": "CRÍTICO", "color": "red" }
+              }
+            }
+          ]
+        }
+      },
       "options": {
-        "textMode": "name",
+        "textMode": "value_and_name",
         "colorMode": "background"
       },
       "targets": [
         {
           "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
-          "query": "from(bucket: \"teg_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"teg_analytics\")\n  |> filter(fn: (r) => r[\"_field\"] == \"score_degradacao\")\n  |> map(fn: (r) => ({ r with _value: if r._value < 0.15 then \"SAUDÁVEL\" else if r._value < 0.35 then \"ALERTA\" else \"CRÍTICO\" }))\n  |> last()"
+          "query": "from(bucket: \"teg_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"teg_analytics\")\n  |> filter(fn: (r) => r[\"_field\"] == \"score_degradacao\")\n  |> last()"
         }
       ]
     },
     {
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 10 },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 10 },
       "id": 23,
-      "title": "Resistência Interna Estimada",
+      "title": "Resistência Interna Estimada (EKF vs Teórica)",
       "type": "stat",
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
       "fieldConfig": {
-        "defaults": { "unit": "ohm" }
+        "defaults": {
+          "unit": "ohm",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 2.2 },
+              { "color": "red", "value": 3.0 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value"
       },
       "targets": [
         {
           "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
-          "query": "from(bucket: \"teg_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"teg_analytics\")\n  |> filter(fn: (r) => r[\"_field\"] == \"r_int_medida\")\n  |> last()"
+          "query": "from(bucket: \"teg_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => (r[\"_measurement\"] == \"esp32_telemetry\" and r[\"_field\"] == \"r_interna_ekf\") or (r[\"_measurement\"] == \"teg_analytics\" and r[\"_field\"] == \"r_int_nominal\"))\n  |> last()"
         }
       ]
     },
     {
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
       "id": 24,
-      "title": "Comparativo em Tempo Real: Tensão Real (ESP) vs Tensão Teórica (Gêmeo Digital)",
+      "title": "Comparativo Preditivo de Tensão (Real vs Modelo Teórico ANSYS)",
       "type": "timeseries",
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }
+        }
+      },
       "targets": [
         {
           "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
-          "query": "from(bucket: \"teg_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => (r[\"_measurement\"] == \"mqtt_consumer\" and r[\"_field\"] == \"tensao_V\") or (r[\"_measurement\"] == \"teg_analytics\" and r[\"_field\"] == \"v_ideal\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
+          "query": "from(bucket: \"teg_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => (r[\"_measurement\"] == \"esp32_telemetry\" and r[\"_field\"] == \"tensao_V\") or (r[\"_measurement\"] == \"teg_analytics\" and r[\"_field\"] == \"v_ideal\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
         }
       ]
     }
