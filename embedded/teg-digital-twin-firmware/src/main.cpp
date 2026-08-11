@@ -8,9 +8,9 @@
 #include <cmath>
 
 // --- CONFIGURAÇÕES DE REDE E MQTT ---
-const char* ssid = "NOME_DA_SUA_REDE_WIFI";
-const char* password = "SENHA_DO_SEU_WIFI";
-const char* mqtt_server = "192.168.X.X"; // Substitua pelo IP Local da sua máquina rodando o Docker
+const char* ssid = "";
+const char* password = "";
+const char* mqtt_server = "192.168.0.9"; // Substitua pelo IP Local da sua máquina rodando o Docker
 const int mqtt_port = 1883;
 const char* mqtt_topic = "teg/bancada/telemetria";
 
@@ -24,7 +24,8 @@ const float B_COEFFICIENT = 3950.0; // Coeficiente Beta do NTC
 WiFiClient espClient;
 PubSubClient client(espClient);
 Adafruit_INA219 ina219;
-Adafruit_ADS1115 ads;
+Adafruit_ADS1115 ads_sonda, ads_teg;
+
 
 unsigned long lastMsg = 0;
 
@@ -99,8 +100,8 @@ void setup() {
   }
   
   // Inicializa ADS1115
-  ads.setGain(GAIN_ONE); // Ganho 1x para ler até 4.096V
-  if (!ads.begin()) {
+  ads_sonda.setGain(GAIN_ONE); // Ganho 1x para ler até 4.096V
+  if (!ads_sonda.begin(0x48)) { // Pino ADDR em GND
     Serial.println("Falha ao encontrar o chip ADS1115");
   }
 }
@@ -112,8 +113,8 @@ void loop() {
   client.loop();
 
   unsigned long now = millis();
-  // Executa o envio a cada 1000 milissegundos (1 segundo)
-  if (now - lastMsg > 1000) {
+  // Executa o envio a cada 500 milissegundos (meio segundo)
+  if (now - lastMsg > 500) {
     lastMsg = now;
 
     // 1. Leituras elétricas do TEG (INA219)
@@ -123,23 +124,23 @@ void loop() {
     float power_mW = ina219.getPower_mW();
     float loadvoltage = busvoltage + (shuntvoltage / 1000);
 
-    // 2. Leituras térmicas dos NTCs via ADS1115
-    int16_t adc0 = ads.readADC_SingleEnded(0);
-    int16_t adc1 = ads.readADC_SingleEnded(1);
-    int16_t adc2 = ads.readADC_SingleEnded(2);
-    int16_t adc3 = ads.readADC_SingleEnded(3);
+    // 2. Leituras térmicas dos NTCs via ADS1115 - Sonda Geotérmica
+    int16_t adc0 = ads_sonda.readADC_SingleEnded(0);
+    int16_t adc1 = ads_sonda.readADC_SingleEnded(1);
+    int16_t adc2 = ads_sonda.readADC_SingleEnded(2);
+    int16_t adc3 = ads_sonda.readADC_SingleEnded(3);
 
     // Converte leituras brutas em graus Celsius
     // T1 e T2 posicionados na face superior (Quente) | T3 e T4 na face inferior (Fria)
-    float t_quente_1 = calcularTemperaturaNTC(adc0);
-    float t_quente_2 = calcularTemperaturaNTC(adc1);
-    float t_frio_1   = calcularTemperaturaNTC(adc2);
-    float t_frio_2   = calcularTemperaturaNTC(adc3);
+    float t1 = calcularTemperaturaNTC(adc0);
+    float t2 = calcularTemperaturaNTC(adc1);
+    float t3 = calcularTemperaturaNTC(adc2);
+    float t4 = calcularTemperaturaNTC(adc3);
 
     // Médias para robustez do cálculo do Gêmeo Digital
-    float t_quente_media = (t_quente_1 + t_quente_2) / 2.0;
-    float t_frio_media = (t_frio_1 + t_frio_2) / 2.0;
-    float delta_t = t_quente_media - t_frio_media;
+    // float t_quente_media = (t_quente_1 + t_quente_2) / 2.0;
+    // float t_frio_media = (t_frio_1 + t_frio_2) / 2.0;
+    // float delta_t = t_quente_media - t_frio_media;
 
     // 3. Montagem do payload JSON usando ArduinoJson v6/v7
     StaticJsonDocument<300> doc;
@@ -153,9 +154,10 @@ void loop() {
 
     // Sub-objeto térmico
     JsonObject termico = doc.createNestedObject("termico");
-    termico["t_quente"] = t_quente_media;
-    termico["t_frio"] = t_frio_media;
-    termico["delta_t"] = delta_t;
+    termico["t1"] = t1;
+    termico["t2"] = t2;
+    termico["t3"] = t3;
+    termico["t4"] = t4;
 
     // Converte o objeto JSON para String
     char buffer[300];

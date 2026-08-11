@@ -1,5 +1,5 @@
 .DS_Store
-
+.vscode/
 # Ignorar pesos e modelos do PyTorch
 *.pt
 *.pth
