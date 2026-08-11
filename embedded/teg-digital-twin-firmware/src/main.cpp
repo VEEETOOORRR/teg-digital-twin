@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Wire.h>
@@ -153,7 +154,7 @@ void loop() {
     // Sub-objeto térmico
     JsonObject termico = doc.createNestedObject("termico");
     termico["t_quente"] = t_quente_media;
-    path_termico["t_frio"] = t_frio_media;
+    termico["t_frio"] = t_frio_media;
     termico["delta_t"] = delta_t;
 
     // Converte o objeto JSON para String
