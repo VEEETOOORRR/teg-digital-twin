@@ -1,0 +1,8 @@
+.DS_Store
+
+# Ignorar pesos e modelos do PyTorch
+*.pt
+*.pth
+*.safetensors
+*.onnx
+*.bin
