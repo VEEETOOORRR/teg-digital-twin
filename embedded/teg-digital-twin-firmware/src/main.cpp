@@ -8,9 +8,9 @@
 #include <cmath>
 
 // --- CONFIGURAÇÕES DE REDE E MQTT ---
-const char* ssid = "";
-const char* password = "";
-const char* mqtt_server = "192.168.0.9"; // Substitua pelo IP Local da sua máquina rodando o Docker
+const char* ssid = "brisa-2797763";
+const char* password = "u9yd3knw";
+const char* mqtt_server = "192.168.0.7"; // Substitua pelo IP Local da sua máquina rodando o Docker
 const int mqtt_port = 1883;
 const char* mqtt_topic = "teg/bancada/telemetria";
 
@@ -101,8 +101,14 @@ void setup() {
   
   // Inicializa ADS1115
   ads_sonda.setGain(GAIN_ONE); // Ganho 1x para ler até 4.096V
+  ads_teg.setGain(GAIN_ONE); // Ganho 1x para ler até 4.096V
+
   if (!ads_sonda.begin(0x48)) { // Pino ADDR em GND
-    Serial.println("Falha ao encontrar o chip ADS1115");
+    Serial.println("Falha ao encontrar o chip ADS1115-Sonda");
+  }
+
+  if (!ads_sonda.begin(0x49)) { // Pino ADDR em VCC
+    Serial.println("Falha ao encontrar o chip ADS1115-TEG");
   }
 }
 
@@ -129,6 +135,12 @@ void loop() {
     int16_t adc1 = ads_sonda.readADC_SingleEnded(1);
     int16_t adc2 = ads_sonda.readADC_SingleEnded(2);
     int16_t adc3 = ads_sonda.readADC_SingleEnded(3);
+
+    // 2.5 Leituras térmicas dos NTCs e tensão do TEG via ADS 
+    int16_t adc4 = ads_teg.readADC_SingleEnded(0);
+    int16_t adc5 = ads_teg.readADC_SingleEnded(1);
+    int16_t adc6 = ads_teg.readADC_SingleEnded(2);
+    int16_t adc7 = ads_teg.readADC_SingleEnded(3);
 
     // Converte leituras brutas em graus Celsius
     // T1 e T2 posicionados na face superior (Quente) | T3 e T4 na face inferior (Fria)
